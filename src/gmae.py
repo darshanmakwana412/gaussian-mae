@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from einops.layers.torch import Rearrange
 
+from einops.layers.torch import Rearrange
 from einops import rearrange, repeat
 
 def pair(t):
@@ -77,27 +77,26 @@ class Transformer(nn.Module):
 
         return self.norm(x)
     
-class MAE(nn.Module):
+class GaussianMAE(nn.Module):
     def __init__(
         self,
-        # encoder configs
-        image_size,
-        patch_size,
-        encoder_dim,
-        encoder_depth,
-        encoder_heads,
-        pool = 'cls',
+
+        image_size = 256,
         channels = 3,
+        patch_size = 4,
+        masking_ratio = 0.75,
+
+        # encoder configs
+        encoder_dim = 512,
+        encoder_depth = 8,
+        encoder_heads = 8,
         encoder_dim_head = 64,
-        dropout = 0.,
-        emb_dropout = 0.,
 
         # decoder configs
         decoder_dim = 512,
-        masking_ratio = 0.75,
-        decoder_depth = 1,
+        decoder_depth = 8,
         decoder_heads = 8,
-        decoder_dim_head = 64
+        decoder_dim_head = 64,
     ):
         super().__init__()
         assert 0 < masking_ratio < 1, 'masking_ratio must be between 0 and 1'
@@ -110,10 +109,9 @@ class MAE(nn.Module):
 
         num_patches = (image_height // patch_height) * (image_width // patch_width)
         patch_dim = channels * patch_height * patch_width
-        assert pool in {'cls', 'mean'}, 'pool type must be either cls or mean'
 
         # patchify
-        self.to_patch = rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_height, p2 = patch_width)
+        self.to_patch = Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_height, p2 = patch_width)
         self.patch_to_emb = nn.Sequential(
             nn.LayerNorm(patch_dim),
             nn.Linear(patch_dim, encoder_dim),
@@ -121,10 +119,7 @@ class MAE(nn.Module):
         )
 
         # Encoder
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, encoder_dim))
-        self.cls_token = nn.Parameter(torch.randn(1, 1, encoder_dim))
-        self.dropout = nn.Dropout(emb_dropout)
-        self.pool = pool
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, encoder_dim))
 
         self.encoder = Transformer(
             dim = encoder_dim, 
@@ -132,7 +127,6 @@ class MAE(nn.Module):
             heads = encoder_heads, 
             dim_head = encoder_dim_head,
             mlp_dim = encoder_dim * 4,
-            dropout = dropout
         )
 
         # Decoder
@@ -149,76 +143,42 @@ class MAE(nn.Module):
         )
         self.decoder_pos_emb = nn.Embedding(num_patches, decoder_dim)
 
-        # "pixel_values_per_patch" = dimension of each patch before embedding
-        pixel_values_per_patch = patch_dim
-        self.to_pixels = nn.Linear(decoder_dim, pixel_values_per_patch)
+        # gaussian head
+        self.to_gaussians = nn.Linear(decoder_dim, 16)
 
     def forward(self, img):
         device = img.device
+        dtype = img.dtype
 
         # 1. Patchify the image
         patches = self.to_patch(img)  
-        tokens = self.patch_to_emb(patches)
+        patch_tokens = self.patch_to_emb(patches)
         batch, num_patches, *_ = patches.shape
 
         # 2. Add positional embeddings
-        if self.pool == "cls":
-            b, n, _ = tokens.shape
-            cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
-            tokens = torch.cat((cls_tokens, tokens), dim=1)
-            tokens = tokens + self.pos_embedding[:, :(n + 1)]
-        else:
-            tokens = tokens + self.pos_embedding[:, 1:(num_patches + 1)]
-        tokens = self.dropout(tokens)
+        patch_tokens += self.pos_embedding[:, :num_patches]
 
         # 3. Mask the patched tokens
         num_to_mask = int(self.masking_ratio * num_patches)
-        total_tokens_for_masking = tokens.shape[1] - 1 if self.pool == "cls" else tokens.shape[1]
-        rand_indices = torch.rand(batch, total_tokens_for_masking, device=device).argsort(dim=-1)
+        rand_indices = torch.rand(batch, patch_tokens.shape[1], device=device).argsort(dim=-1)
 
         masked_indices = rand_indices[:, :num_to_mask]
         unmasked_indices = rand_indices[:, num_to_mask:]
-        if self.pool == "cls":
-            patch_tokens = tokens[:, 1:]
-        else:
-            patch_tokens = tokens
 
         batch_range = torch.arange(batch, device=device)[:, None]
         unmasked_tokens = patch_tokens[batch_range, unmasked_indices]
 
-        masked_patches = patches[batch_range, masked_indices]
-
-        if self.pool == "cls":
-            cls_tok = tokens[:, 0].unsqueeze(1)
-            tokens_for_encoder = torch.cat((cls_tok, unmasked_tokens), dim=1)
-        else:
-            tokens_for_encoder = unmasked_tokens
-
         # 4. Pass the unmasked tokens through the encoder
-        encoded_tokens = self.encoder(tokens_for_encoder)
+        encoded_tokens = self.encoder(unmasked_tokens)
         decoder_tokens = self.enc_to_dec(encoded_tokens)
 
         # 5. Prepare the full set of tokens for the decoder
-        all_decoder_tokens = torch.zeros(batch, num_patches, self.decoder_dim, device=device)
-
-        
-        if self.pool == "cls":
-            unmasked_decoder_tokens = decoder_tokens[:, 1:]  
-        else:
-            unmasked_decoder_tokens = decoder_tokens
-
-        # Add decoder position embeddings to the unmasked tokens
-        unmasked_decoder_tokens = (
-            unmasked_decoder_tokens + self.decoder_pos_emb(unmasked_indices)
-        )
-
-        # Place unmasked tokens into full set
-        all_decoder_tokens[batch_range, unmasked_indices] = unmasked_decoder_tokens
+        all_decoder_tokens = torch.zeros(batch, num_patches, self.decoder_dim, device=device, dtype=dtype)
+        all_decoder_tokens[batch_range, unmasked_indices] = decoder_tokens + self.decoder_pos_emb(unmasked_indices)
 
         mask_tokens = repeat(self.mask_token, 'd -> b n d', b=batch, n=num_to_mask)
         mask_tokens = mask_tokens + self.decoder_pos_emb(masked_indices)
 
-        # Insert mask tokens
         all_decoder_tokens[batch_range, masked_indices] = mask_tokens
 
         # 7. Pass the full set of tokens through the decoder
@@ -226,8 +186,36 @@ class MAE(nn.Module):
 
         # 8. Project the masked tokens to pixel space
         masked_decoded_tokens = decoded_tokens[batch_range, masked_indices]
-        pred_pixel_values = self.to_pixels(masked_decoded_tokens)
+        gaussian_params = self.to_gaussians(masked_decoded_tokens)
 
-        recon_loss = F.mse_loss(pred_pixel_values, masked_patches)
+        # # 9. Calculate the reconstruction loss
+        # masked_patches = patches[batch_range, masked_indices]
+        # recon_loss = F.mse_loss(pred_pixel_values, masked_patches)
 
-        return recon_loss
+        return gaussian_params
+    
+if __name__ == "__main__":
+    dtype = torch.bfloat16
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    gmae = GaussianMAE(
+        image_size = 256,
+        channels = 3,
+        patch_size = 4,
+        masking_ratio = 0.75,
+
+        # encoder configs
+        encoder_dim = 512,
+        encoder_depth = 8,
+        encoder_heads = 8,
+        encoder_dim_head = 64,
+
+        # decoder configs
+        decoder_dim = 512,
+        decoder_depth = 8,
+        decoder_heads = 8,
+        decoder_dim_head = 64
+    ).to(device, dtype)
+
+    imgs = torch.randn(7, 3, 256, 256).to(device, dtype)
+
+    params = gmae(imgs)
