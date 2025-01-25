@@ -31,3 +31,5 @@ imgs = torch.randn(100, 3, 256, 256)
 
 loss = mae(imgs)
 ```
+
+To download and extract the dataset used for training run `source scripts/download.sh`
