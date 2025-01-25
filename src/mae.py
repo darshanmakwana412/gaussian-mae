@@ -86,7 +86,6 @@ class MAE(nn.Module):
         encoder_dim,
         encoder_depth,
         encoder_heads,
-        encoder_mlp_dim,
         pool = 'cls',
         channels = 3,
         encoder_dim_head = 64,
@@ -132,7 +131,7 @@ class MAE(nn.Module):
             depth = encoder_depth,
             heads = encoder_heads, 
             dim_head = encoder_dim_head,
-            mlp_dim = encoder_mlp_dim,
+            mlp_dim = encoder_dim * 4,
             dropout = dropout
         )
 
