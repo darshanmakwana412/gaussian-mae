@@ -35,3 +35,16 @@ loss = gmae(imgs)
 ```
 
 To download and extract the dataset used for training run `source scripts/download.sh`
+
+### Installation
+
+```bash
+# create conda env and install torch
+conda create --name gmae -y python=3.10
+conda activate gmae
+pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
+
+# install gsplat
+pip install git+https://github.com/nerfstudio-project/gsplat.git
+```
