@@ -47,4 +47,11 @@ conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
 
 # install gsplat
 pip install git+https://github.com/nerfstudio-project/gsplat.git
+
+# a very specific version of numpy works with this setup
+# idk why :), will debug this in the future
+pip install numpy==1.26
+
+# install einops
+pip install einops
 ```

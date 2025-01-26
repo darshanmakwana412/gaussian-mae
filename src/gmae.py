@@ -5,6 +5,8 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat
 
+from gsplat import rasterization
+
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
 
@@ -104,6 +106,8 @@ class GaussianMAE(nn.Module):
 
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
+        self.image_width = image_width
+        self.image_height = image_height
 
         assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
 
@@ -144,9 +148,9 @@ class GaussianMAE(nn.Module):
         self.decoder_pos_emb = nn.Embedding(num_patches, decoder_dim)
 
         # gaussian head
-        self.to_gaussians = nn.Linear(decoder_dim, 16)
+        self.to_gaussians = nn.Linear(decoder_dim, 14)
 
-    def forward(self, img):
+    def forward(self, img, c: float = 1.0, focal_length = 50):
         device = img.device
         dtype = img.dtype
 
@@ -188,14 +192,35 @@ class GaussianMAE(nn.Module):
         masked_decoded_tokens = decoded_tokens[batch_range, masked_indices]
         gaussian_params = self.to_gaussians(masked_decoded_tokens)
 
-        # # 9. Calculate the reconstruction loss
-        # masked_patches = patches[batch_range, masked_indices]
-        # recon_loss = F.mse_loss(pred_pixel_values, masked_patches)
+        mean, quat, scale, color, opacity = torch.split(
+            gaussian_params[0],
+            [3, 4, 3, 3, 1], 
+            dim=-1
+        )
+        mean = mean - mean.mean(dim=0)
 
-        return gaussian_params
+        quat = quat / torch.norm(quat, dim=-1, keepdim=True)
+        scale = c * F.sigmoid(scale)
+        color = F.sigmoid(color)
+        opacity = F.sigmoid(opacity).squeeze(-1)
+
+        self.view = torch.eye(4, device=device, dtype=dtype)[None]
+        self.K = torch.tensor(
+            [[[focal_length, 0.0, self.image_width // 2],
+            [0.0, focal_length, self.image_height // 2],
+            [0.0, 0.0, 1.0]]], device=device, dtype=dtype
+        )
+
+        rgb_image, alpha, metadata = rasterization(
+            mean, quat, scale, opacity, color,
+            self.view, self.K, self.image_width, self.image_height,
+            camera_model="ortho", rasterize_mode="antialiased"
+        )
+
+        return rgb_image, alpha, metadata
     
 if __name__ == "__main__":
-    dtype = torch.bfloat16
+    dtype = torch.float32
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     gmae = GaussianMAE(
         image_size = 256,
@@ -216,6 +241,9 @@ if __name__ == "__main__":
         decoder_dim_head = 64
     ).to(device, dtype)
 
-    imgs = torch.randn(7, 3, 256, 256).to(device, dtype)
+    imgs = torch.randn(1, 3, 256, 256).to(device, dtype)
 
-    params = gmae(imgs)
+    rgb_image, alpha, metadata = gmae(imgs, c=0.05, focal_length=175)
+
+    from torchvision.utils import save_image
+    save_image(rgb_image[0].permute(2, 0, 1), "test.jpg")
