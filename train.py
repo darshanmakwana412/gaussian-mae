@@ -1,5 +1,5 @@
 import os
-os.environ["WANDB_API_KEY"] = "9dde7332219eb634449f78f704f5297da0ea022e"
+os.environ["WANDB_API_KEY"] = ""
 
 import torch
 import wandb
