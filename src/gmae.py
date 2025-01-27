@@ -222,7 +222,7 @@ class GaussianMAE(nn.Module):
 
         # 9. Reconstruction loss
         pred_patches = self.to_patch(rgb_image.permute(0, 3, 1, 2))[0] * 5
-        pred_patches -= pred_patches.mean()
+        pred_patches = pred_patches - pred_patches.mean()
         recon_loss = F.mse_loss(pred_patches[masked_indices], patches[0, masked_indices])
 
         return rgb_image, alpha, metadata, recon_loss

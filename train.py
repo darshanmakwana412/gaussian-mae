@@ -1,3 +1,6 @@
+import os
+os.environ["WANDB_API_KEY"] = "9dde7332219eb634449f78f704f5297da0ea022e"
+
 import torch
 import wandb
 import torch.nn.functional as F
@@ -12,7 +15,7 @@ from src.CUBDataset import CUBDataset
 def train_gmae():
     # 1) Initialize W&B
     wandb.init(
-        project="GaussianMAE-CUB"
+        project="GaussianMAE-CUB",
     )
 
     # 2) Device and hyperparameters
@@ -92,6 +95,29 @@ def train_gmae():
                     "global_step": global_step
                 })
 
+            if step % 500 == 0:
+                with torch.no_grad():
+                    # rgb_image range is [0, 1], so it is already suitable for logging
+                    example_recon = rgb_image[0].clamp(0, 1).cpu().numpy()
+                    # Log original image side-by-side if you want
+                    original_img = imgs[0].permute(1, 2, 0).cpu().numpy() * 0.5 + 0.5  # if your dataset transforms are [-1,1]
+                    # Note: Adjust the above "0.5 + 0.5" if your transforms differ
+
+                    wandb.log({
+                        "Reconstruction": [
+                            wandb.Image(
+                                example_recon * 255,
+                                caption=f"Reconstructed (Epoch {epoch+1})"
+                            )
+                        ],
+                        "Original": [
+                            wandb.Image(
+                                original_img * 255,
+                                caption=f"Original (Epoch {epoch+1})"
+                            )
+                        ]
+                    })
+
         # Step the scheduler at the end of the epoch
         scheduler.step()
 
@@ -104,30 +130,6 @@ def train_gmae():
             "epoch_loss": avg_loss,
             "epoch": epoch + 1
         })
-
-        # Optionally, log example images (reconstruction) at end of epoch
-        # (Here we'll just log the last batch's first image)
-        with torch.no_grad():
-            # rgb_image range is [0, 1], so it is already suitable for logging
-            example_recon = rgb_image[0].clamp(0, 1).cpu()
-            # Log original image side-by-side if you want
-            original_img = imgs[0].permute(1, 2, 0).cpu() * 0.5 + 0.5  # if your dataset transforms are [-1,1]
-            # Note: Adjust the above "0.5 + 0.5" if your transforms differ
-
-            wandb.log({
-                "Reconstruction": [
-                    wandb.Image(
-                        example_recon,
-                        caption=f"Reconstructed (Epoch {epoch+1})"
-                    )
-                ],
-                "Original": [
-                    wandb.Image(
-                        original_img,
-                        caption=f"Original (Epoch {epoch+1})"
-                    )
-                ]
-            })
 
     # 7) Finish W&B run
     wandb.finish()
