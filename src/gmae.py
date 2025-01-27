@@ -7,6 +7,8 @@ from einops import rearrange, repeat
 
 from gsplat import rasterization
 
+from torchvision.utils import save_image
+
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
 
@@ -198,6 +200,7 @@ class GaussianMAE(nn.Module):
             dim=-1
         )
         mean = mean - mean.mean(dim=0)
+        mean[:, -1] += 2.0
 
         quat = quat / torch.norm(quat, dim=-1, keepdim=True)
         scale = c * F.sigmoid(scale)
@@ -217,7 +220,12 @@ class GaussianMAE(nn.Module):
             camera_model="ortho", rasterize_mode="antialiased"
         )
 
-        return rgb_image, alpha, metadata
+        # 9. Reconstruction loss
+        pred_patches = self.to_patch(rgb_image.permute(0, 3, 1, 2))[0] * 5
+        pred_patches -= pred_patches.mean()
+        recon_loss = F.mse_loss(pred_patches[masked_indices], patches[0, masked_indices])
+
+        return rgb_image, alpha, metadata, recon_loss
     
 if __name__ == "__main__":
     dtype = torch.float32
@@ -243,7 +251,6 @@ if __name__ == "__main__":
 
     imgs = torch.randn(1, 3, 256, 256).to(device, dtype)
 
-    rgb_image, alpha, metadata = gmae(imgs, c=0.05, focal_length=175)
+    rgb_image, alpha, metadata, recon_loss = gmae(imgs, c=0.1, focal_length=175)
 
-    from torchvision.utils import save_image
     save_image(rgb_image[0].permute(2, 0, 1), "test.jpg")
