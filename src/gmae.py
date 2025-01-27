@@ -252,5 +252,6 @@ if __name__ == "__main__":
     imgs = torch.randn(1, 3, 256, 256).to(device, dtype)
 
     rgb_image, alpha, metadata, recon_loss = gmae(imgs, c=0.1, focal_length=175)
+    # rgb_image has a range of [0, 1]
 
     save_image(rgb_image[0].permute(2, 0, 1), "test.jpg")

@@ -1,0 +1,13 @@
+[project]
+name = "gaussian-mae"
+version = "0.0.1"
+
+dependencies = [
+    "einops",
+    "numpy==1.26",
+    "wandb",
+    "tqdm"
+]
+
+[tool.setuptools.packages.find]
+include = ["src/*"]

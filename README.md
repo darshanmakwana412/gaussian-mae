@@ -4,6 +4,38 @@
 
 <a href="https://arxiv.org/abs/2501.03229v1">Gaussian MAE</a> explores masked autoencoders (MAE) with gaussian splatting. It enables some zero shot capabilities via mid level gaussian based representations
 
+To use the Gaussian MAE use
+```python
+dtype = torch.float32
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+gmae = GaussianMAE(
+    image_size = 256,
+    channels = 3,
+    patch_size = 4,
+    masking_ratio = 0.75,
+
+    # encoder configs
+    encoder_dim = 512,
+    encoder_depth = 8,
+    encoder_heads = 8,
+    encoder_dim_head = 64,
+
+    # decoder configs
+    decoder_dim = 512,
+    decoder_depth = 8,
+    decoder_heads = 8,
+    decoder_dim_head = 64
+).to(device, dtype)
+
+imgs = torch.randn(1, 3, 256, 256).to(device, dtype)
+
+rgb_image, alpha, metadata, recon_loss = gmae(imgs, c=0.1, focal_length=175)
+# rgb_image has a range of [0, 1]
+# recon_loss.backward()
+
+save_image(rgb_image[0].permute(2, 0, 1), "test.jpg")
+```
+
 To use the vanilla mae use the following
 ```python
 from src.mae import MAE
@@ -48,10 +80,6 @@ conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
 # install gsplat
 pip install git+https://github.com/nerfstudio-project/gsplat.git
 
-# a very specific version of numpy works with this setup
-# idk why :), will debug this in the future
-pip install numpy==1.26
-
-# install einops
-pip install einops
+# install the dependencies
+pip install -e .
 ```
