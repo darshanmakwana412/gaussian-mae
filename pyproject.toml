@@ -6,7 +6,8 @@ dependencies = [
     "einops",
     "numpy==1.26",
     "wandb",
-    "tqdm"
+    "tqdm",
+    "python-dotenv"
 ]
 
 [tool.setuptools.packages.find]

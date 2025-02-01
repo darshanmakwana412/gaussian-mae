@@ -1,16 +1,13 @@
-import os
-os.environ["WANDB_API_KEY"] = ""
-
 import torch
 import wandb
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from torchvision.utils import make_grid
-from torchvision import transforms
 
 from src.gmae import GaussianMAE
 from src.CUBDataset import CUBDataset
+
+from dotenv import load_dotenv
+load_dotenv()
 
 def train_gmae():
     # 1) Initialize W&B
