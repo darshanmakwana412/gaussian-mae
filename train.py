@@ -11,15 +11,16 @@ load_dotenv()
 
 def train_gmae():
     # 1) Initialize W&B
-    wandb.init(
-        project="GaussianMAE-CUB",
-    )
+    # wandb.init(
+    #     project="GaussianMAE-CUB",
+    # )
 
     # 2) Device and hyperparameters
     device = "cuda" if torch.cuda.is_available() else "cpu"
     lr = 1e-4
     epochs = 400
-    batch_size = 1
+    batch_size = 2
+    num_workers = 2
 
     # 3) Create your dataset & dataloader
     train_dataset = CUBDataset(
@@ -30,7 +31,7 @@ def train_gmae():
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=1,
+        num_workers=num_workers,
         pin_memory=True
     )
 
@@ -42,13 +43,13 @@ def train_gmae():
         masking_ratio = 0.75,
 
         # Encoder configs
-        encoder_dim = 512,
+        encoder_dim = 384,
         encoder_depth = 6,
         encoder_heads = 6,
         encoder_dim_head = 64,
 
         # Decoder configs
-        decoder_dim = 512,
+        decoder_dim = 384,
         decoder_depth = 6,
         decoder_heads = 6,
         decoder_dim_head = 64
@@ -73,47 +74,47 @@ def train_gmae():
             imgs = imgs.to(device, dtype=torch.float32)
 
             # Forward pass through the GaussianMAE
-            rgb_image, alpha, metadata, recon_loss = gmae(imgs, c=0.1, focal_length=175)
+            means, quats, scales, colors, opacity = gmae(imgs, c=0.1, focal_length=175)
 
             # Backprop & update
-            optimizer.zero_grad()
-            recon_loss.backward()
-            optimizer.step()
+            # optimizer.zero_grad()
+            # recon_loss.backward()
+            # optimizer.step()
 
-            total_loss += recon_loss.item()
-            global_step += 1
+            # total_loss += recon_loss.item()
+            # global_step += 1
 
             # Log metrics every N steps
-            if step % 10 == 0:
-                wandb.log({
-                    "train_loss": recon_loss.item(),
-                    "learning_rate": scheduler.get_last_lr()[0],
-                    "epoch": epoch + 1,
-                    "global_step": global_step
-                })
+            # if step % 10 == 0:
+            #     wandb.log({
+            #         "train_loss": recon_loss.item(),
+            #         "learning_rate": scheduler.get_last_lr()[0],
+            #         "epoch": epoch + 1,
+            #         "global_step": global_step
+            #     })
 
-            if step % 500 == 0:
-                with torch.no_grad():
-                    # rgb_image range is [0, 1], so it is already suitable for logging
-                    example_recon = rgb_image[0].clamp(0, 1).cpu().numpy()
-                    # Log original image side-by-side if you want
-                    original_img = imgs[0].permute(1, 2, 0).cpu().numpy() * 0.5 + 0.5  # if your dataset transforms are [-1,1]
-                    # Note: Adjust the above "0.5 + 0.5" if your transforms differ
+            # if step % 500 == 0:
+            #     with torch.no_grad():
+            #         # rgb_image range is [0, 1], so it is already suitable for logging
+            #         example_recon = rgb_image[0].clamp(0, 1).cpu().numpy()
+            #         # Log original image side-by-side if you want
+            #         original_img = imgs[0].permute(1, 2, 0).cpu().numpy() * 0.5 + 0.5  # if your dataset transforms are [-1,1]
+            #         # Note: Adjust the above "0.5 + 0.5" if your transforms differ
 
-                    wandb.log({
-                        "Reconstruction": [
-                            wandb.Image(
-                                example_recon * 255,
-                                caption=f"Reconstructed (Epoch {epoch+1})"
-                            )
-                        ],
-                        "Original": [
-                            wandb.Image(
-                                original_img * 255,
-                                caption=f"Original (Epoch {epoch+1})"
-                            )
-                        ]
-                    })
+            #         wandb.log({
+            #             "Reconstruction": [
+            #                 wandb.Image(
+            #                     example_recon * 255,
+            #                     caption=f"Reconstructed (Epoch {epoch+1})"
+            #                 )
+            #             ],
+            #             "Original": [
+            #                 wandb.Image(
+            #                     original_img * 255,
+            #                     caption=f"Original (Epoch {epoch+1})"
+            #                 )
+            #             ]
+            #         })
 
         # Step the scheduler at the end of the epoch
         scheduler.step()
@@ -123,13 +124,13 @@ def train_gmae():
         print(f"Epoch [{epoch+1}/{epochs}] - Loss: {avg_loss:.4f}")
 
         # Log epoch-level metrics
-        wandb.log({
-            "epoch_loss": avg_loss,
-            "epoch": epoch + 1
-        })
+        # wandb.log({
+        #     "epoch_loss": avg_loss,
+        #     "epoch": epoch + 1
+        # })
 
     # 7) Finish W&B run
-    wandb.finish()
+    # wandb.finish()
 
 
 if __name__ == "__main__":

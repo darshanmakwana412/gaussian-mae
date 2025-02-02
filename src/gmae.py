@@ -7,7 +7,7 @@ from einops import rearrange, repeat
 
 from gsplat import rasterization
 
-from torchvision.utils import save_image
+from torchvision.utils import save_image, make_grid
 
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
@@ -152,7 +152,7 @@ class GaussianMAE(nn.Module):
         # gaussian head
         self.to_gaussians = nn.Linear(decoder_dim, 14)
 
-    def forward(self, img, c: float = 1.0, focal_length = 50):
+    def forward(self, img):
         device = img.device
         dtype = img.dtype
 
@@ -194,39 +194,43 @@ class GaussianMAE(nn.Module):
         masked_decoded_tokens = decoded_tokens[batch_range, masked_indices]
         gaussian_params = self.to_gaussians(masked_decoded_tokens)
 
-        mean, quat, scale, color, opacity = torch.split(
-            gaussian_params[0],
-            [3, 4, 3, 3, 1], 
+        return gaussian_params
+    
+    def decode_gaussian_params(self, gaussian_params, c: float = 1.0):
+        means, quats, scales, opacities, colors = torch.split(
+            gaussian_params,
+            [3, 4, 3, 1, 3], 
             dim=-1
         )
-        mean = mean - mean.mean(dim=0)
-        mean[:, -1] += 2.0
 
-        quat = quat / torch.norm(quat, dim=-1, keepdim=True)
-        scale = c * F.sigmoid(scale)
-        color = F.sigmoid(color)
-        opacity = F.sigmoid(opacity).squeeze(-1)
+        means = F.tanh(F.layer_norm(means.T, means.shape[:1]).T)
+        quats = F.sigmoid(quats)
+        scales = c * F.sigmoid(scales)
+        opacities = F.sigmoid(opacities).squeeze(-1)
+        colors = F.sigmoid(colors)
 
-        self.view = torch.eye(4, device=device, dtype=dtype)[None]
-        self.K = torch.tensor(
+        return means, quats, scales, opacities, colors
+    
+    def rasterize(self, means, quats, scales, opacities, colors, focal_length: float = 175.0):
+        device = means.device
+        dtype = means.dtype
+
+        viewmats = torch.eye(4, device=device, dtype=dtype)[None]
+        Ks = torch.tensor(
             [[[focal_length, 0.0, self.image_width // 2],
             [0.0, focal_length, self.image_height // 2],
             [0.0, 0.0, 1.0]]], device=device, dtype=dtype
         )
 
+        # https://github.com/nerfstudio-project/gsplat/blob/0880d2b471e6650d458aa09fe2b2834531f6e93b/gsplat/rendering.py#L28-L54
         rgb_image, alpha, metadata = rasterization(
-            mean, quat, scale, opacity, color,
-            self.view, self.K, self.image_width, self.image_height,
+            means, quats, scales, opacities, colors,
+            viewmats, Ks, self.image_width, self.image_height,
             camera_model="ortho", rasterize_mode="antialiased"
         )
 
-        # 9. Reconstruction loss
-        pred_patches = self.to_patch(rgb_image.permute(0, 3, 1, 2))[0] * 5
-        pred_patches = pred_patches - pred_patches.mean()
-        recon_loss = F.mse_loss(pred_patches[masked_indices], patches[0, masked_indices])
+        return rgb_image, alpha, metadata
 
-        return rgb_image, alpha, metadata, recon_loss
-    
 if __name__ == "__main__":
     dtype = torch.float32
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -249,9 +253,38 @@ if __name__ == "__main__":
         decoder_dim_head = 64
     ).to(device, dtype)
 
-    imgs = torch.randn(1, 3, 256, 256).to(device, dtype)
+    imgs = torch.randn(3, 3, 256, 256).to(device, dtype)
 
-    rgb_image, alpha, metadata, recon_loss = gmae(imgs, c=0.1, focal_length=175)
-    # rgb_image has a range of [0, 1]
+    # Replicates the memory efficient implementation from https://arxiv.org/abs/2404.19737
+    gaussian_params_shared = gmae(imgs)
+    gaussian_params = gaussian_params_shared.detach()
+    gaussian_params.requires_grad = True
 
-    save_image(rgb_image[0].permute(2, 0, 1), "test.jpg")
+    images = []
+    loss = 0
+    for gaussian_param, img in zip(gaussian_params, imgs):
+        (
+            means,
+            quats,
+            scales,
+            opacities,
+            colors,
+        ) = gmae.decode_gaussian_params(gaussian_param, c=0.05)
+
+        rgb_image, alpha, metadata = gmae.rasterize(
+            means,
+            quats,
+            scales,
+            opacities,
+            colors,
+            focal_length=130.0
+        )
+        rgb_image = rgb_image[0].permute(2, 0, 1)
+        F.mse_loss(rgb_image, img).backward()
+
+        images.append(rgb_image.clone().detach().cpu())
+
+    gaussian_params_shared.backward(gradient=gaussian_params.grad)
+
+    grid = make_grid(images, nrow=3, padding=2, normalize=True)
+    save_image(grid, "output.png")
