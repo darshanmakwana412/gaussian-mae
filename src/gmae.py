@@ -206,7 +206,7 @@ class GaussianMAE(nn.Module):
         means = F.tanh(F.layer_norm(means.T, means.shape[:1]).T)
         quats = F.sigmoid(quats)
         scales = c * F.sigmoid(scales)
-        opacities = F.sigmoid(opacities).squeeze(-1)
+        opacities = 0.1 + F.sigmoid(opacities).squeeze(-1)
         colors = F.sigmoid(colors)
 
         return means, quats, scales, opacities, colors
@@ -226,7 +226,7 @@ class GaussianMAE(nn.Module):
         rgb_image, alpha, metadata = rasterization(
             means, quats, scales, opacities, colors,
             viewmats, Ks, self.image_width, self.image_height,
-            camera_model="ortho", rasterize_mode="antialiased"
+            camera_model="ortho", rasterize_mode="classic"
         )
 
         return rgb_image, alpha, metadata
@@ -241,13 +241,13 @@ if __name__ == "__main__":
         masking_ratio = 0.75,
 
         # encoder configs
-        encoder_dim = 512,
+        encoder_dim = 384,
         encoder_depth = 8,
         encoder_heads = 8,
         encoder_dim_head = 64,
 
         # decoder configs
-        decoder_dim = 512,
+        decoder_dim = 384,
         decoder_depth = 8,
         decoder_heads = 8,
         decoder_dim_head = 64

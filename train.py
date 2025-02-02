@@ -2,25 +2,30 @@ import torch
 import wandb
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import torch.nn.functional as F
 
 from src.gmae import GaussianMAE
 from src.CUBDataset import CUBDataset
+
+from torchvision.utils import make_grid
 
 from dotenv import load_dotenv
 load_dotenv()
 
 def train_gmae():
     # 1) Initialize W&B
-    # wandb.init(
-    #     project="GaussianMAE-CUB",
-    # )
+    wandb.init(
+        project="GaussianMAE-CUB",
+    )
 
     # 2) Device and hyperparameters
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    lr = 1e-4
+    dtype = torch.float32
+    lr = 1e-3
     epochs = 400
-    batch_size = 2
-    num_workers = 2
+    batch_size = 3
+    num_workers = 3
+    log_interval = 10
 
     # 3) Create your dataset & dataloader
     train_dataset = CUBDataset(
@@ -63,75 +68,89 @@ def train_gmae():
         eta_min=1e-6
     )
 
-    # 6) Training loop
     global_step = 0
     for epoch in range(epochs):
         gmae.train()
-        total_loss = 0.0
 
-        # Go through one epoch
         for step, (imgs, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")):
-            imgs = imgs.to(device, dtype=torch.float32)
+            
+            optimizer.zero_grad()
+            
+            imgs = imgs.to(device, dtype)
 
             # Forward pass through the GaussianMAE
-            means, quats, scales, colors, opacity = gmae(imgs, c=0.1, focal_length=175)
+            gaussian_params_shared = gmae(imgs)
+            gaussian_params = gaussian_params_shared.detach()
+            gaussian_params.requires_grad = True
 
-            # Backprop & update
-            # optimizer.zero_grad()
-            # recon_loss.backward()
-            # optimizer.step()
+            images = []
+            total_loss = 0.0
+            avg_scales = torch.zeros(3)
+            avg_means = torch.zeros(3)
+            avg_opacities = torch.zeros(1)
+            avg_colors = torch.zeros(3)
+            for gaussian_param, img in zip(gaussian_params, imgs):
+                (
+                    means,
+                    quats,
+                    scales,
+                    opacities,
+                    colors,
+                ) = gmae.decode_gaussian_params(gaussian_param, c=0.1)
 
-            # total_loss += recon_loss.item()
-            # global_step += 1
+                rgb_image, alpha, metadata = gmae.rasterize(
+                    means,
+                    quats,
+                    scales,
+                    opacities,
+                    colors,
+                    focal_length=130.0
+                )
+                rgb_image = rgb_image[0].permute(2, 0, 1)
 
-            # Log metrics every N steps
-            # if step % 10 == 0:
-            #     wandb.log({
-            #         "train_loss": recon_loss.item(),
-            #         "learning_rate": scheduler.get_last_lr()[0],
-            #         "epoch": epoch + 1,
-            #         "global_step": global_step
-            #     })
+                loss = F.mse_loss(rgb_image, img)
+                images.append(img.clone().detach().cpu() * 0.5 + 0.5)
+                images.append(rgb_image.clone().detach().cpu())
 
-            # if step % 500 == 0:
-            #     with torch.no_grad():
-            #         # rgb_image range is [0, 1], so it is already suitable for logging
-            #         example_recon = rgb_image[0].clamp(0, 1).cpu().numpy()
-            #         # Log original image side-by-side if you want
-            #         original_img = imgs[0].permute(1, 2, 0).cpu().numpy() * 0.5 + 0.5  # if your dataset transforms are [-1,1]
-            #         # Note: Adjust the above "0.5 + 0.5" if your transforms differ
+                avg_scales += scales.clone().detach().cpu().mean(dim=0)
+                avg_means += means.clone().detach().cpu().mean(dim=0)
+                avg_opacities += opacities.clone().detach().cpu().mean(dim=0)
+                avg_colors += colors.clone().detach().cpu().mean(dim=0)
+                total_loss += loss.item()
 
-            #         wandb.log({
-            #             "Reconstruction": [
-            #                 wandb.Image(
-            #                     example_recon * 255,
-            #                     caption=f"Reconstructed (Epoch {epoch+1})"
-            #                 )
-            #             ],
-            #             "Original": [
-            #                 wandb.Image(
-            #                     original_img * 255,
-            #                     caption=f"Original (Epoch {epoch+1})"
-            #                 )
-            #             ]
-            #         })
+                loss.backward()
 
-        # Step the scheduler at the end of the epoch
+            gaussian_params_shared.backward(gradient=gaussian_params.grad)
+
+            optimizer.step()
+
+            global_step += 1
+            if step % log_interval == 0:
+                wandb.log({
+                    "train_loss": total_loss,
+                    "learning_rate": scheduler.get_last_lr()[0],
+                    "epoch": epoch + 1,
+                    "global_step": global_step,
+                    "scale x": avg_scales[0],
+                    "scale y": avg_scales[1],
+                    "scale z": avg_scales[2],
+                    "mean x": avg_means[0],
+                    "mean y": avg_means[1],
+                    "mean z": avg_means[2],
+                    "opacity": avg_opacities[0],
+                    "color r": avg_colors[0],
+                    "color g": avg_colors[1],
+                    "color b": avg_colors[2],
+                    "images": [
+                        wandb.Image(
+                            make_grid(images, nrow=4, padding=2, normalize=True)
+                        )
+                    ]
+                })
+
         scheduler.step()
 
-        # Average loss for this epoch
-        avg_loss = total_loss / len(train_loader)
-        print(f"Epoch [{epoch+1}/{epochs}] - Loss: {avg_loss:.4f}")
-
-        # Log epoch-level metrics
-        # wandb.log({
-        #     "epoch_loss": avg_loss,
-        #     "epoch": epoch + 1
-        # })
-
-    # 7) Finish W&B run
-    # wandb.finish()
-
+    wandb.finish()
 
 if __name__ == "__main__":
     train_gmae()
