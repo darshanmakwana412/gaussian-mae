@@ -21,10 +21,10 @@ def train_gmae():
     # 2) Device and hyperparameters
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
-    lr = 1e-3
+    lr = 1e-4
     epochs = 400
-    batch_size = 3
-    num_workers = 3
+    batch_size = 22
+    num_workers = 8
     log_interval = 10
 
     # 3) Create your dataset & dataloader
@@ -46,6 +46,7 @@ def train_gmae():
         channels = 3,
         patch_size = 4,
         masking_ratio = 0.75,
+        num_gaussians=512,
 
         # Encoder configs
         encoder_dim = 384,
@@ -65,7 +66,7 @@ def train_gmae():
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=epochs,
-        eta_min=1e-6
+        eta_min=1e-7
     )
 
     global_step = 0
@@ -79,9 +80,11 @@ def train_gmae():
             imgs = imgs.to(device, dtype)
 
             # Forward pass through the GaussianMAE
-            gaussian_params_shared = gmae(imgs)
-            gaussian_params = gaussian_params_shared.detach()
-            gaussian_params.requires_grad = True
+            # gaussian_params_shared = gmae(imgs)
+            # gaussian_params = gaussian_params_shared.detach()
+            # gaussian_params.requires_grad = True
+
+            gaussian_params = gmae(imgs)
 
             images = []
             total_loss = 0.0
@@ -96,7 +99,7 @@ def train_gmae():
                     scales,
                     opacities,
                     colors,
-                ) = gmae.decode_gaussian_params(gaussian_param, c=0.1)
+                ) = gmae.decode_gaussian_params(gaussian_param, c=0.2)
 
                 rgb_image, alpha, metadata = gmae.rasterize(
                     means,
@@ -104,7 +107,7 @@ def train_gmae():
                     scales,
                     opacities,
                     colors,
-                    focal_length=130.0
+                    focal_length=200.0
                 )
                 rgb_image = rgb_image[0].permute(2, 0, 1)
 
@@ -112,22 +115,25 @@ def train_gmae():
                 images.append(img.clone().detach().cpu() * 0.5 + 0.5)
                 images.append(rgb_image.clone().detach().cpu())
 
-                avg_scales += scales.clone().detach().cpu().mean(dim=0)
-                avg_means += means.clone().detach().cpu().mean(dim=0)
-                avg_opacities += opacities.clone().detach().cpu().mean(dim=0)
-                avg_colors += colors.clone().detach().cpu().mean(dim=0)
-                total_loss += loss.item()
+                avg_scales += scales.clone().detach().cpu().mean(dim=0) / len(imgs)
+                avg_means += means.clone().detach().cpu().mean(dim=0) / len(imgs)
+                avg_opacities += opacities.clone().detach().cpu().mean(dim=0) / len(imgs)
+                avg_colors += colors.clone().detach().cpu().mean(dim=0) / len(imgs)
+                # total_loss += loss.item()
 
-                loss.backward()
+                total_loss += loss
 
-            gaussian_params_shared.backward(gradient=gaussian_params.grad)
+                # loss.backward()
+
+            # gaussian_params_shared.backward(gradient=gaussian_params.grad)
+            total_loss.backward()
 
             optimizer.step()
 
             global_step += 1
             if step % log_interval == 0:
                 wandb.log({
-                    "train_loss": total_loss,
+                    "train_loss": total_loss.item(),
                     "learning_rate": scheduler.get_last_lr()[0],
                     "epoch": epoch + 1,
                     "global_step": global_step,
@@ -143,7 +149,7 @@ def train_gmae():
                     "color b": avg_colors[2],
                     "images": [
                         wandb.Image(
-                            make_grid(images, nrow=4, padding=2, normalize=True)
+                            make_grid(images, nrow=10, padding=2, normalize=True)
                         )
                     ]
                 })

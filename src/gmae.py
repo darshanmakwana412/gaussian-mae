@@ -89,6 +89,7 @@ class GaussianMAE(nn.Module):
         channels = 3,
         patch_size = 4,
         masking_ratio = 0.75,
+        num_gaussians = 512,
 
         # encoder configs
         encoder_dim = 512,
@@ -110,6 +111,7 @@ class GaussianMAE(nn.Module):
         patch_height, patch_width = pair(patch_size)
         self.image_width = image_width
         self.image_height = image_height
+        self.num_gaussians = num_gaussians
 
         assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
 
@@ -138,7 +140,7 @@ class GaussianMAE(nn.Module):
         # Decoder
         self.decoder_dim = decoder_dim
         self.enc_to_dec = nn.Linear(encoder_dim, decoder_dim) if encoder_dim != decoder_dim else nn.Identity()
-        self.mask_token = nn.Parameter(torch.randn(decoder_dim))
+        self.mask_token = nn.Parameter(torch.randn(num_gaussians, decoder_dim))
 
         self.decoder = Transformer(
             dim = decoder_dim,
@@ -147,7 +149,7 @@ class GaussianMAE(nn.Module):
             dim_head = decoder_dim_head,
             mlp_dim = decoder_dim * 4
         )
-        self.decoder_pos_emb = nn.Embedding(num_patches, decoder_dim)
+        self.decoder_pos_emb = nn.Embedding(num_gaussians, decoder_dim)
 
         # gaussian head
         self.to_gaussians = nn.Linear(decoder_dim, 14)
@@ -179,21 +181,23 @@ class GaussianMAE(nn.Module):
         decoder_tokens = self.enc_to_dec(encoded_tokens)
 
         # 5. Prepare the full set of tokens for the decoder
-        all_decoder_tokens = torch.zeros(batch, num_patches, self.decoder_dim, device=device, dtype=dtype)
-        all_decoder_tokens[batch_range, unmasked_indices] = decoder_tokens + self.decoder_pos_emb(unmasked_indices)
+        # all_decoder_tokens = torch.zeros(batch, num_patches, self.decoder_dim, device=device, dtype=dtype)
+        # all_decoder_tokens[batch_range, unmasked_indices] = decoder_tokens + self.decoder_pos_emb(unmasked_indices)
 
-        mask_tokens = repeat(self.mask_token, 'd -> b n d', b=batch, n=num_to_mask)
-        mask_tokens = mask_tokens + self.decoder_pos_emb(masked_indices)
+        # mask_tokens = repeat(self.mask_token, 'n d -> b n d', b=batch)
+        mask_tokens = torch.randn(batch, self.num_gaussians, self.decoder_dim).to(device, dtype)
+        mask_tokens = mask_tokens + self.decoder_pos_emb.weight
 
-        all_decoder_tokens[batch_range, masked_indices] = mask_tokens
+        # all_decoder_tokens[batch_range, masked_indices] = mask_tokens
+
+        decoder_tokens = torch.cat((decoder_tokens, mask_tokens), dim=1)
 
         # 7. Pass the full set of tokens through the decoder
-        decoded_tokens = self.decoder(all_decoder_tokens)
+        decoded_tokens = self.decoder(decoder_tokens)
 
         # 8. Project the masked tokens to pixel space
-        masked_decoded_tokens = decoded_tokens[batch_range, masked_indices]
+        masked_decoded_tokens = decoded_tokens[:, encoded_tokens.shape[1]:]
         gaussian_params = self.to_gaussians(masked_decoded_tokens)
-
         return gaussian_params
     
     def decode_gaussian_params(self, gaussian_params, c: float = 1.0):
@@ -203,10 +207,11 @@ class GaussianMAE(nn.Module):
             dim=-1
         )
 
-        means = F.tanh(F.layer_norm(means.T, means.shape[:1]).T)
+        means = F.tanh(means)
+        means = means - means.mean(dim=0)
         quats = F.sigmoid(quats)
         scales = c * F.sigmoid(scales)
-        opacities = 0.1 + F.sigmoid(opacities).squeeze(-1)
+        opacities = F.sigmoid(opacities).squeeze(-1)
         colors = F.sigmoid(colors)
 
         return means, quats, scales, opacities, colors
@@ -216,6 +221,7 @@ class GaussianMAE(nn.Module):
         dtype = means.dtype
 
         viewmats = torch.eye(4, device=device, dtype=dtype)[None]
+        viewmats[:, 2, 3] = 5
         Ks = torch.tensor(
             [[[focal_length, 0.0, self.image_width // 2],
             [0.0, focal_length, self.image_height // 2],
@@ -226,7 +232,8 @@ class GaussianMAE(nn.Module):
         rgb_image, alpha, metadata = rasterization(
             means, quats, scales, opacities, colors,
             viewmats, Ks, self.image_width, self.image_height,
-            camera_model="ortho", rasterize_mode="classic"
+            camera_model="ortho", rasterize_mode="classic",
+            backgrounds=torch.tensor([[1.0, 1.0, 1.0]], device=device, dtype=dtype)
         )
 
         return rgb_image, alpha, metadata
@@ -239,21 +246,23 @@ if __name__ == "__main__":
         channels = 3,
         patch_size = 4,
         masking_ratio = 0.75,
+        num_gaussians=512,
 
         # encoder configs
         encoder_dim = 384,
-        encoder_depth = 8,
-        encoder_heads = 8,
+        encoder_depth = 6,
+        encoder_heads = 6,
         encoder_dim_head = 64,
 
         # decoder configs
         decoder_dim = 384,
-        decoder_depth = 8,
-        decoder_heads = 8,
+        decoder_depth = 6,
+        decoder_heads = 6,
         decoder_dim_head = 64
     ).to(device, dtype)
 
-    imgs = torch.randn(3, 3, 256, 256).to(device, dtype)
+    # imgs = torch.randn(4, 3, 256, 256).to(device, dtype)
+    imgs = torch.randn(4, 3, 256, 256).to(device, dtype) * 2 - 1
 
     # Replicates the memory efficient implementation from https://arxiv.org/abs/2404.19737
     gaussian_params_shared = gmae(imgs)
@@ -269,7 +278,7 @@ if __name__ == "__main__":
             scales,
             opacities,
             colors,
-        ) = gmae.decode_gaussian_params(gaussian_param, c=0.05)
+        ) = gmae.decode_gaussian_params(gaussian_param, c=0.2)
 
         rgb_image, alpha, metadata = gmae.rasterize(
             means,
@@ -277,7 +286,7 @@ if __name__ == "__main__":
             scales,
             opacities,
             colors,
-            focal_length=130.0
+            focal_length=200
         )
         rgb_image = rgb_image[0].permute(2, 0, 1)
         F.mse_loss(rgb_image, img).backward()
@@ -286,5 +295,5 @@ if __name__ == "__main__":
 
     gaussian_params_shared.backward(gradient=gaussian_params.grad)
 
-    grid = make_grid(images, nrow=3, padding=2, normalize=True)
+    grid = make_grid(images, nrow=2, padding=2, normalize=True)
     save_image(grid, "output.png")
