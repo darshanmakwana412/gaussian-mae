@@ -12,32 +12,29 @@ To use the Gaussian MAE use
 ```python
 dtype = torch.float32
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-gmae = GaussianMAE(
-    image_size = 256,
-    channels = 3,
-    patch_size = 4,
-    masking_ratio = 0.75,
-
-    # encoder configs
-    encoder_dim = 512,
-    encoder_depth = 8,
-    encoder_heads = 8,
-    encoder_dim_head = 64,
-
-    # decoder configs
-    decoder_dim = 512,
-    decoder_depth = 8,
-    decoder_heads = 8,
-    decoder_dim_head = 64
+gmae = GMAE(
+    image_size=256,
+    patch_size=8,
+    encoder_dim=384,
+    encoder_depth=6,
+    encoder_heads=6,
+    encoder_dim_head=64,
+    num_gaussians=512,
+    dropout=0.1,
+    emb_dropout=0.0,
+    decoder_dim=384,
+    masking_ratio=0.75,
+    decoder_depth=6,
+    decoder_heads=6,
+    decoder_dim_head=64,
+    channels=3,
+    add_gauss_pos=False
 ).to(device, dtype)
 
-imgs = torch.randn(1, 3, 256, 256).to(device, dtype)
+imgs = torch.randn(4, 3, 256, 256).to(device, dtype)
 
-rgb_image, alpha, metadata, recon_loss = gmae(imgs, c=0.1, focal_length=175)
-# rgb_image has a range of [0, 1]
-# recon_loss.backward()
-
-save_image(rgb_image[0].permute(2, 0, 1), "test.jpg")
+recon_loss = gmae(imgs)
+recon_loss.backward()
 ```
 
 To use the vanilla mae use the following
