@@ -1,0 +1,43 @@
+defaults:
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# Logging parameters
+log: True
+project: "masked-vit-celeba"
+run_name: "gmae_run"
+log_every_n_steps: 50
+
+# Data module parameters
+data_dir: /home/wangz19/darshan/gaussian-mae/datasets/celeba
+batch_size: 64
+num_workers: 8
+crop_size: [176, 208]
+
+# Model hyperparameters
+patch_size: 8
+encoder_dim: 256
+encoder_depth: 6
+encoder_heads: 8
+encoder_dim_head: 64
+dropout: 0.1
+emb_dropout: 0.0
+decoder_dim: 512
+masking_ratio: 0.75
+decoder_depth: 6
+decoder_heads: 8
+decoder_dim_head: 64
+learning_rate: 1e-4
+num_gaussians: 512
+focal_length: 150.0
+scale_factor: 0.1
+add_gauss_pos: False
+
+# Trainer parameters
+epochs: 50
+devices: 1
+num_nodes: 1
+accelerator: "cuda"
+strategy: "ddp"
+precision: 32
+val_check_interval: 500

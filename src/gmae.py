@@ -180,20 +180,15 @@ class GaussianMAE(nn.Module):
         encoded_tokens = self.encoder(unmasked_tokens)
         decoder_tokens = self.enc_to_dec(encoded_tokens)
 
-        # 5. Prepare the full set of tokens for the decoder
-        # all_decoder_tokens = torch.zeros(batch, num_patches, self.decoder_dim, device=device, dtype=dtype)
-        # all_decoder_tokens[batch_range, unmasked_indices] = decoder_tokens + self.decoder_pos_emb(unmasked_indices)
-
-        # mask_tokens = repeat(self.mask_token, 'n d -> b n d', b=batch)
-        mask_tokens = torch.randn(batch, self.num_gaussians, self.decoder_dim).to(device, dtype)
+        # 5. Prepare the gaussian mask tokens
+        mask_tokens = repeat(self.mask_token, 'n d -> b n d', b=batch).to(device, dtype)
         mask_tokens = mask_tokens + self.decoder_pos_emb.weight
 
-        # all_decoder_tokens[batch_range, masked_indices] = mask_tokens
-
-        decoder_tokens = torch.cat((decoder_tokens, mask_tokens), dim=1)
-
         # 7. Pass the full set of tokens through the decoder
-        decoded_tokens = self.decoder(decoder_tokens)
+        decoded_tokens = self.decoder(torch.cat((
+            decoder_tokens,
+            mask_tokens
+        ), dim=1))
 
         # 8. Project the masked tokens to pixel space
         masked_decoded_tokens = decoded_tokens[:, encoded_tokens.shape[1]:]
@@ -208,8 +203,7 @@ class GaussianMAE(nn.Module):
         )
 
         means = F.tanh(means)
-        means = means - means.mean(dim=0)
-        quats = F.sigmoid(quats)
+        quats = quats / (torch.norm(quats, dim=-1, keepdim=True) + 1e-8)
         scales = c * F.sigmoid(scales)
         opacities = F.sigmoid(opacities).squeeze(-1)
         colors = F.sigmoid(colors)
@@ -270,7 +264,7 @@ if __name__ == "__main__":
     gaussian_params.requires_grad = True
 
     images = []
-    loss = 0
+    total_loss = 0
     for gaussian_param, img in zip(gaussian_params, imgs):
         (
             means,
@@ -289,7 +283,9 @@ if __name__ == "__main__":
             focal_length=200
         )
         rgb_image = rgb_image[0].permute(2, 0, 1)
-        F.mse_loss(rgb_image, img).backward()
+        loss = F.mse_loss(rgb_image, img)
+        total_loss += loss.item()
+        loss.backward()
 
         images.append(rgb_image.clone().detach().cpu())
 

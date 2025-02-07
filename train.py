@@ -23,7 +23,7 @@ def train_gmae():
     dtype = torch.float32
     lr = 1e-4
     epochs = 400
-    batch_size = 22
+    batch_size = 8
     num_workers = 8
     log_interval = 10
 
@@ -45,7 +45,7 @@ def train_gmae():
         image_size = 256,
         channels = 3,
         patch_size = 4,
-        masking_ratio = 0.75,
+        masking_ratio = 0.5,
         num_gaussians=512,
 
         # Encoder configs

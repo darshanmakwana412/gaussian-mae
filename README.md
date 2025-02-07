@@ -4,6 +4,10 @@
 
 <a href="https://arxiv.org/abs/2501.03229v1">Gaussian MAE</a> explores masked autoencoders (MAE) with gaussian splatting. It enables some zero shot capabilities via mid level gaussian based representations
 
+These are some of the samples from gaussian mae after training on CelebA dataset for 2 epochs
+
+<img src="./assets/samples.png" width="800px"></img>
+
 To use the Gaussian MAE use
 ```python
 dtype = torch.float32
