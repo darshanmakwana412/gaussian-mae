@@ -271,9 +271,9 @@ class GMAE(nn.Module):
 
         return means, quats, scales, opacities, colors
     
-    def rasterize(self, means, quats, scales, opacities, colors, focal_length: float = 175.0):
+    def rasterize(self, means, quats, scales, opacities, colors, focal_length: float = 175.0, dtype: torch.dtype = torch.float32):
         device = means.device
-        dtype = means.dtype
+        input_dtype = means.dtype
 
         image_width, image_height = self.image_size
 
@@ -287,13 +287,13 @@ class GMAE(nn.Module):
 
         # https://github.com/nerfstudio-project/gsplat/blob/0880d2b471e6650d458aa09fe2b2834531f6e93b/gsplat/rendering.py#L28-L54
         rgb_image, alpha, metadata = rasterization(
-            means, quats, scales, opacities, colors,
-            viewmats, Ks, image_width, image_height,
+            means.to(dtype), quats.to(dtype), scales.to(dtype), opacities.to(dtype), colors.to(dtype),
+            viewmats.to(dtype), Ks.to(dtype), image_width, image_height,
             camera_model="ortho", rasterize_mode="classic",
             backgrounds=torch.tensor([[1.0, 1.0, 1.0]], device=device, dtype=dtype)
         )
 
-        return rgb_image, alpha, metadata
+        return rgb_image.to(input_dtype), alpha.to(input_dtype), metadata
 
 if __name__ == "__main__":
     dtype = torch.float32

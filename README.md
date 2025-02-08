@@ -84,3 +84,8 @@ pip install git+https://github.com/nerfstudio-project/gsplat.git
 # install the dependencies
 pip install -e .
 ```
+
+### Training Speed ups
+
+Half Precision: 5.02it/s
+full preicision: 3.48it/s
