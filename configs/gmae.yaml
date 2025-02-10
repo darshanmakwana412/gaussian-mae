@@ -39,5 +39,5 @@ devices: 1
 num_nodes: 1
 accelerator: "cuda"
 strategy: "ddp"
-precision: 32
+precision: 16-mixed
 val_check_interval: 500

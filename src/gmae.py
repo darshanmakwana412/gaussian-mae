@@ -271,6 +271,7 @@ class GMAE(nn.Module):
 
         return means, quats, scales, opacities, colors
     
+    @torch.compiler.disable(recursive=True)
     def rasterize(self, means, quats, scales, opacities, colors, focal_length: float = 175.0, dtype: torch.dtype = torch.float32):
         device = means.device
         input_dtype = means.dtype
