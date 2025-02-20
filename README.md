@@ -89,3 +89,35 @@ pip install -e .
 
 Half Precision: 5.02it/s
 full preicision: 3.48it/s
+
+## Citations
+```bibex
+@misc{rajasegaran2025gaussianmaskedautoencoders,
+      title={Gaussian Masked Autoencoders}, 
+      author={Jathushan Rajasegaran and Xinlei Chen and Rulilong Li and Christoph Feichtenhofer and Jitendra Malik and Shiry Ginosar},
+      year={2025},
+      eprint={2501.03229},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2501.03229}, 
+}
+
+@article{DBLP:journals/corr/abs-2111-06377,
+  author       = {Kaiming He and
+                  Xinlei Chen and
+                  Saining Xie and
+                  Yanghao Li and
+                  Piotr Doll{\'{a}}r and
+                  Ross B. Girshick},
+  title        = {Masked Autoencoders Are Scalable Vision Learners},
+  journal      = {CoRR},
+  volume       = {abs/2111.06377},
+  year         = {2021},
+  url          = {https://arxiv.org/abs/2111.06377},
+  eprinttype    = {arXiv},
+  eprint       = {2111.06377},
+  timestamp    = {Tue, 16 Nov 2021 12:12:31 +0100},
+  biburl       = {https://dblp.org/rec/journals/corr/abs-2111-06377.bib},
+  bibsource    = {dblp computer science bibliography, https://dblp.org}
+}
+```
