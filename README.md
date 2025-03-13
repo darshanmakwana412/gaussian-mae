@@ -1,4 +1,4 @@
-## Gaussian MAE (WIP)
+## Gaussian MAE
 
 <img src="./assets/gmae.png" width="650px"></img>
 
